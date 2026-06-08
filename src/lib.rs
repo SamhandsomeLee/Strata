@@ -3,6 +3,8 @@
 //! Module layout follows `doc/strata-runtime-kernel-design.md` §1 (layering) and §2 (contracts).
 
 pub mod action;
+
+pub use action::{Action, ActionBackend, JsonToolCall};
 pub mod error;
 pub mod message;
 
