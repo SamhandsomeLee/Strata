@@ -1,0 +1,13 @@
+---
+description: MVP 范围闸门，禁止越界特性
+alwaysApply: true
+---
+
+# MVP 范围
+
+禁止在 MVP 引入：async / tokio、图引擎、多 agent、第二个 provider、
+CodeAction 沙箱、复杂 planning（TODO 树 / 反思链）。
+
+并发模型固定为同步 blocking（决策 6）。
+
+需要这些时：停下，引用 §5，等确认，不要自作主张扩大范围。

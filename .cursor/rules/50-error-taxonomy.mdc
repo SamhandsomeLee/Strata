@@ -1,0 +1,13 @@
+---
+description: 错误分类与上抛/回填分水岭
+globs: src/error.rs
+alwaysApply: false
+---
+
+# 错误处理（§6）
+
+- `ProviderError`（网络 / 鉴权 / 限流）：可上抛或重试。
+- `ParseError` / `ToolError`：不上抛，回填进对话让模型纠正。
+- `LoopError`（超 max_turns）：优雅终止 + 返回部分结果。
+
+区分原则：循环内的 parse / tool 错误一律回填，只有 provider 层错误可上抛。

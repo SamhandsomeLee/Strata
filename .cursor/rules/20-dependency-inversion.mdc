@@ -1,0 +1,14 @@
+---
+description: 内核核心不得依赖具体 provider/tool
+globs: src/**/*.rs
+alwaysApply: false
+---
+
+# 依赖倒置（model-agnostic 的结构保证）
+
+- 内核核心（message / provider / tool / action / trace / run）只定义 trait，
+  不得 import 任何具体 provider 或 tool 模块。
+- HTTP 客户端（reqwest 等）只能出现在 `src/providers/` 下。
+- 禁止 `if model == "..."` 之类的模型分支判断（硬验收 §10）。
+
+依赖方向：`providers/` 和 `tools/` 依赖内核核心，核心绝不反向依赖它们。

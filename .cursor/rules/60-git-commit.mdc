@@ -1,0 +1,34 @@
+---
+description: Git 提交信息规范（Conventional Commits）
+alwaysApply: true
+---
+
+# Git 提交规范
+
+格式：`<type>(<scope>): <subject>`，subject 用中文，祈使句，不加句号，≤ 50 字。
+
+## type（必填）
+
+- `feat` 新功能 | `fix` 修复 | `refactor` 重构 | `test` 测试
+- `docs` 文档 | `chore` 杂务/依赖 | `perf` 性能 | `style` 格式
+
+## scope（建议，对应内核模块）
+
+`message` | `provider` | `tool` | `action` | `session` | `trace` | `run`
+| `error` | `cursor`（规则/hook）| `doc`
+
+## 规则
+
+- 一次提交只做一件事；跨模块的大改拆成多个提交。
+- body（可选）解释 **why** 而非 what，与 subject 空一行。
+- 关联里程碑时在 footer 注明，如 `Milestone: M0`。
+- 未经用户明确要求，不得擅自 commit。
+
+## 示例
+
+```
+feat(message): 落地统一消息模型 Message/ContentBlock/Role
+
+对应设计文档 §2.1，作为 model-agnostic 的数据地基。
+Milestone: M0
+```

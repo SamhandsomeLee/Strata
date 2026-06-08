@@ -1,0 +1,12 @@
+---
+description: 模型差异全部封闭在 provider 实现层
+globs: src/providers/**/*.rs
+alwaysApply: false
+---
+
+# Provider 实现（§2.2）
+
+- 鉴权、API 序列化、原生 tool call 格式 ↔ `ContentBlock` 翻译，全在这层。
+- 对外只暴露 `Provider` trait，不泄漏任何 provider 特有概念。
+- DeepSeek 走 OpenAI 兼容格式（`tools` 参数 + `tool_calls` 响应）。
+- 模型偶发不调工具 / JSON 飘 → 不在这里 panic，交给循环回填纠正。

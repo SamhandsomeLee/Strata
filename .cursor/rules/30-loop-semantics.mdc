@@ -1,0 +1,13 @@
+---
+description: Agentic loop 的精确语义
+globs: src/run.rs
+alwaysApply: false
+---
+
+# 循环语义（§3）
+
+- 唯一正常终止：模型输出纯文本（无 tool call）→ 返回最终答案。
+- `max_turns` 兜底防失控。
+- parse / tool 错误**回填**成 `ContentBlock::ToolResult { is_error: true }`，
+  绝不 panic、绝不从循环 `Err` 上抛（让模型自我纠正）。
+- 单条扁平 history，所有 turn 共享，不分叉。

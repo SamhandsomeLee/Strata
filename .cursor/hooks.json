@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "node .cursor/hooks/guard-edit.js",
+        "matcher": "Write|StrReplace|EditNotebook",
+        "failClosed": false
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "node .cursor/hooks/guard-deps.js",
+        "matcher": "cargo add",
+        "failClosed": false
+      }
+    ]
+  }
+}
