@@ -5,15 +5,7 @@
 
 use crate::error::ProviderError;
 use crate::message::Message;
-
-/// Tool declaration sent to the model. C05 will move this to `tool.rs`; provider keeps using it.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ToolSchema {
-    pub name: String,
-    pub description: String,
-    /// JSON Schema object; provider impls map to their API format (e.g. OpenAI `parameters`).
-    pub parameters: serde_json::Value,
-}
+use crate::tool::ToolSchema;
 
 /// Unified completion input. Must not expose any provider-specific concepts.
 #[derive(Debug, Clone, PartialEq)]
@@ -72,6 +64,8 @@ mod tests {
 
     #[test]
     fn tool_schema_holds_json_parameters() {
+        use crate::tool::ToolSchema;
+
         let schema = ToolSchema {
             name: "calculator".into(),
             description: "Evaluate arithmetic.".into(),

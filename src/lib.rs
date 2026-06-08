@@ -10,8 +10,10 @@ pub use error::{LoopError, ParseError, ProviderError, StrataError, ToolError};
 pub use message::{ContentBlock, Message, Role};
 pub mod provider;
 
-pub use provider::{CompletionRequest, CompletionResponse, Provider, ToolSchema};
+pub use provider::{CompletionRequest, CompletionResponse, Provider};
 pub mod run;
 pub mod session;
 pub mod tool;
+
+pub use tool::{Tool, ToolRegistry, ToolSchema};
 pub mod trace;
