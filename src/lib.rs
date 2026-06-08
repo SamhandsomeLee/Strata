@@ -21,3 +21,5 @@ pub mod tool;
 
 pub use tool::{Tool, ToolRegistry, ToolSchema};
 pub mod trace;
+
+pub use trace::{ConsoleTracer, NoopTracer, TraceEvent, Tracer};
