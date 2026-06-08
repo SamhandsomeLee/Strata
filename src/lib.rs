@@ -6,6 +6,7 @@ pub mod action;
 pub mod error;
 pub mod message;
 
+pub use error::{LoopError, ParseError, ProviderError, StrataError, ToolError};
 pub use message::{ContentBlock, Message, Role};
 pub mod provider;
 pub mod run;
