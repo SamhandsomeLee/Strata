@@ -14,6 +14,8 @@ pub mod provider;
 
 pub use provider::{CompletionRequest, CompletionResponse, Provider};
 pub mod run;
+
+pub use run::run;
 pub mod session;
 
 pub use session::Session;
