@@ -15,6 +15,8 @@ pub mod provider;
 pub use provider::{CompletionRequest, CompletionResponse, Provider};
 pub mod run;
 pub mod session;
+
+pub use session::Session;
 pub mod tool;
 
 pub use tool::{Tool, ToolRegistry, ToolSchema};
