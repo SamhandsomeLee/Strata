@@ -5,6 +5,8 @@
 pub mod action;
 pub mod error;
 pub mod message;
+
+pub use message::{ContentBlock, Message, Role};
 pub mod provider;
 pub mod run;
 pub mod session;
