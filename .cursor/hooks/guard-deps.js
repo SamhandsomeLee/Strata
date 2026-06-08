@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /*
  * beforeShellExecution 守卫：拦截引入违禁/越界依赖的 `cargo add`。
- * reqwest 暂列黑名单（M0 不接网络）；做到接 DeepSeek 那步时把它移出 banned。
+ * reqwest 已在 M1 准备阶段移出黑名单（仅允许通过 C10+ 加入，且只能用于 src/providers/）。
  * 返回 "ask" 而非 "deny"：留人工放行口子，避免合理依赖被一刀切。
  */
 const fs = require("fs");
@@ -29,7 +29,7 @@ try {
 
 const cmd = String(input.command || input.cmd || "");
 
-const banned = ["tokio", "async-trait", "futures", "petgraph", "reqwest"];
+const banned = ["tokio", "async-trait", "futures", "petgraph"];
 const hit = banned.filter((p) =>
   new RegExp(`cargo\\s+add\\s+[^\\n]*\\b${p}\\b`).test(cmd)
 );

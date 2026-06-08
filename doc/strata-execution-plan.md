@@ -122,8 +122,15 @@
 
 ## 进度追踪
 
-- [ ] M0 骨架（C01–C09）
+- [x] M0 骨架（C01–C09）
 - [ ] M1 单循环（C10–C13）
+
+### M1 准备（进入 C10 前已完成）
+
+- [x] `src/providers/` 模块目录就位
+- [x] `guard-deps.js` 将 `reqwest` 移出 banned（tokio 等仍禁）
+- [x] `.env.example` 提供 `DEEPSEEK_API_KEY` 模板
+- [x] `AGENTS.md` 当前里程碑更新为 M1
 - [ ] M2 工具（C14–C16）
 - [ ] M3 健壮性（C17–C20）
 - [ ] M4 真场景（C21–C24）← MVP 完成

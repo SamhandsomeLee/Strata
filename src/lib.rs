@@ -13,6 +13,7 @@ pub use message::{ContentBlock, Message, Role};
 pub mod provider;
 
 pub use provider::{CompletionRequest, CompletionResponse, Provider};
+pub mod providers;
 pub mod run;
 
 pub use run::run;

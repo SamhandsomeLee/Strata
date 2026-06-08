@@ -29,7 +29,18 @@
 
 ## 当前里程碑
 
-M0：骨架编译通过（统一消息模型 + 各 trait 空实现），不接网络。
+**M1：单循环**（C10–C13）——接 DeepSeek，跑通无工具问答；tracing 可见 provider 调用。
+
+M0 已完成（C01–C09）：骨架编译通过，trait 边界就位。
+
+### M1 执行顺序
+
+1. **C10** `src/providers/deepseek.rs`：`reqwest::blocking`、env 鉴权、无工具 completion
+2. **C11** `JsonToolCall::parse_actions` 落地（M1 无工具路径不触发，但需就位）
+3. **C12** `build_request` + `ProviderCall` trace + 纯文本终止路径
+4. **C13** `examples/ask.rs` 端到端 demo
+
+环境：复制 `.env.example` → `.env`，设置 `DEEPSEEK_API_KEY`。
 
 ## 越界时
 
