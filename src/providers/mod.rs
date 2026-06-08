@@ -2,3 +2,7 @@
 //!
 //! Auth, API serialization, and native format translation stay in this tree only.
 //! C10 adds `deepseek` (OpenAI-compatible, blocking HTTP).
+
+pub mod deepseek;
+
+pub use deepseek::DeepSeekProvider;
