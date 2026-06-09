@@ -29,16 +29,15 @@
 
 ## 当前里程碑
 
-**M1：单循环**（C10–C13）——接 DeepSeek，跑通无工具问答；tracing 可见 provider 调用。
+**M2：工具**（C14–C16）——calculator 工具 + 工具执行闭环 + demo。
 
-M0 已完成（C01–C09）：骨架编译通过，trait 边界就位。
+M1 已完成（C10–C13）：DeepSeek 问答循环跑通，`examples/ask.rs` 可演示。
 
-### M1 执行顺序
+### M2 执行顺序
 
-1. **C10** `src/providers/deepseek.rs`：`reqwest::blocking`、env 鉴权、无工具 completion
-2. **C11** `JsonToolCall::parse_actions` 落地（M1 无工具路径不触发，但需就位）
-3. **C12** `build_request` + `ProviderCall` trace + 纯文本终止路径
-4. **C13** `examples/ask.rs` 端到端 demo
+1. **C14** `calculator` 工具：schema + execute
+2. **C15** `run()` 工具闭环：执行 → 回填 → 继续
+3. **C16** `examples/` 工具调用 demo
 
 环境：复制 `.env.example` → `.env`，设置 `DEEPSEEK_API_KEY`。
 
