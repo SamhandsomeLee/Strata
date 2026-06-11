@@ -29,15 +29,18 @@
 
 ## 当前里程碑
 
-**M2：工具**（C14–C16）——calculator 工具 + 工具执行闭环 + demo。
+**M3：健壮性**（C17–C20）——max_turns 优雅终止、错误回填、结构化 tracing、MockProvider 测试。
+
+M2 已完成（C14–C16）：calculator + 工具执行闭环，`examples/calc.rs` 可演示。
 
 M1 已完成（C10–C13）：DeepSeek 问答循环跑通，`examples/ask.rs` 可演示。
 
-### M2 执行顺序
+### M3 执行顺序
 
-1. **C14** `calculator` 工具：schema + execute
-2. **C15** `run()` 工具闭环：执行 → 回填 → 继续
-3. **C16** `examples/` 工具调用 demo
+1. **C17** `max_turns` 兜底与失控保护
+2. **C18** parse/tool 错误回填不崩溃（边界强化）
+3. **C19** 结构化 trace 补全
+4. **C20** MockProvider 与循环语义集成测试
 
 环境：复制 `.env.example` → `.env`，设置 `DEEPSEEK_API_KEY`。
 
