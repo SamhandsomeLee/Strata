@@ -25,6 +25,9 @@ pub use session::Session;
 pub mod tool;
 
 pub use tool::{Tool, ToolRegistry, ToolSchema};
+pub mod tools;
+
+pub use tools::Calculator;
 pub mod trace;
 
 pub use trace::{ConsoleTracer, NoopTracer, TraceEvent, Tracer};
