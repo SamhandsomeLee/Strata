@@ -9,7 +9,8 @@
 use std::io::{self, BufRead};
 
 use strata::{
-    run, ConsoleTracer, DeepSeekProvider, JsonToolCall, Message, Session, ToolRegistry,
+    run, ConsoleTracer, DeepSeekProvider, JsonToolCall, LoopError, Message, Session, StrataError,
+    ToolRegistry,
 };
 
 const MAX_TURNS: u32 = 8;
@@ -33,17 +34,31 @@ fn run_demo() -> Result<(), Box<dyn std::error::Error>> {
     let mut session = Session::new();
     session.push(Message::user(question));
 
-    let answer = run(
+    let result = run(
         &mut session,
         &provider,
         &ToolRegistry::new(),
         &JsonToolCall,
         &ConsoleTracer,
         MAX_TURNS,
-    )?;
+    );
 
-    println!("{answer}");
-    Ok(())
+    match result {
+        Ok(answer) => {
+            println!("{answer}");
+            Ok(())
+        }
+        // `Display` 上的 MaxTurns 只是摘要，partial 在结构体字段里——单独取出展示部分结果。
+        Err(StrataError::Loop(LoopError::MaxTurns { max_turns, partial })) => {
+            eprintln!("error: 达到最大轮数 {max_turns}，未能得出最终回答");
+            if let Some(text) = partial {
+                eprintln!("--- 部分结果 ---");
+                println!("{text}");
+            }
+            std::process::exit(1);
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 fn read_question() -> Result<String, Box<dyn std::error::Error>> {

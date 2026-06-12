@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::message::Message;
+use crate::message::{Message, Role};
 
 /// Agent loop mutable state: one linear history and a tool-round counter.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -39,6 +39,16 @@ impl Session {
     pub fn is_empty(&self) -> bool {
         self.history.is_empty()
     }
+
+    /// Last assistant message text blocks, scanning from the end. Empty text → `None`.
+    pub fn last_assistant_text(&self) -> Option<String> {
+        self.history
+            .iter()
+            .rev()
+            .find(|m| m.role == Role::Assistant)
+            .map(Message::text)
+            .filter(|text| !text.is_empty())
+    }
 }
 
 #[cfg(test)]
@@ -61,6 +71,33 @@ mod tests {
         assert_eq!(session.history.len(), 2);
         assert_eq!(session.history[0].role, crate::message::Role::System);
         assert_eq!(session.history[1].text(), "hi");
+    }
+
+    #[test]
+    fn last_assistant_text_skips_tool_only_and_empty() {
+        let session = Session::with_history(vec![
+            Message::user("q"),
+            Message::assistant(vec![ContentBlock::Text("first".into())]),
+            Message::assistant(vec![ContentBlock::ToolCall {
+                id: "call_1".into(),
+                name: "calculator".into(),
+                args: serde_json::json!({ "expression": "1+1" }),
+            }]),
+        ]);
+        assert_eq!(session.last_assistant_text(), None);
+
+        let session = Session::with_history(vec![
+            Message::user("q"),
+            Message::assistant(vec![
+                ContentBlock::Text("step1".into()),
+                ContentBlock::ToolCall {
+                    id: "call_1".into(),
+                    name: "calculator".into(),
+                    args: serde_json::json!({ "expression": "1+1" }),
+                },
+            ]),
+        ]);
+        assert_eq!(session.last_assistant_text(), Some("step1".into()));
     }
 
     #[test]

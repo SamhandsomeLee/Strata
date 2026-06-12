@@ -14,6 +14,21 @@ use crate::trace::{TraceEvent, Tracer};
 const DEFAULT_MAX_TOKENS: u32 = 4096;
 
 /// Runs the agentic loop until the model returns a plain-text answer or an error propagates.
+///
+/// # `max_turns` 语义
+///
+/// `max_turns` 约束的是**工具往返轮数**，不是 provider 调用次数：`session.turn` 仅在
+/// 执行过工具后才递增，纯文本终止轮不计数。由此推出两个反直觉的边界，调用方需注意：
+///
+/// - `max_turns == 0`：provider 一次都不会被调用，纯文本问答也会立即返回
+///   [`LoopError::MaxTurns`]。至少要传 `1` 才能拿到一次回答。
+/// - 「一次工具调用 + 最终回答」至少需要 `max_turns >= 2`：`max_turns == 1` 时模型发起
+///   工具调用、执行回填后 `turn` 增至 1，下一轮 provider 调用前即被截停，模型永远看不到
+///   工具结果。给工具任务留够轮数。
+///
+/// 超限时返回 [`LoopError::MaxTurns`]，其 `partial` 字段携带终止前最后一条 assistant
+/// 纯文本（若有）。注意 [`LoopError`] 的 `Display` 只是摘要、**不含** `partial`——要展示
+/// 部分结果，须读取该结构体字段。
 pub fn run(
     session: &mut Session,
     provider: &dyn Provider,
@@ -26,9 +41,17 @@ pub fn run(
         // `session.turn` 计的是「工具往返轮」而非「provider 调用次数」：仅在执行过工具后
         // 才 `+= 1`（见循环末尾），纯文本终止轮不计数。因此 max_turns 实际约束的是工具
         // 循环的往返上限——失控只可能来自工具反复调用，这正是要兜底的对象。
-        // 注意：这里仅做提前返回，带部分结果的优雅终止与边界测试属 C17/C20，本轮不实现。
         if session.turn >= max_turns {
-            return Err(LoopError::MaxTurns { max_turns }.into());
+            let partial = session.last_assistant_text();
+            tracer.on_event(TraceEvent::Error {
+                turn: Some(session.turn),
+                message: format!("max turns exceeded ({max_turns})"),
+            });
+            return Err(LoopError::MaxTurns {
+                max_turns,
+                partial,
+            }
+            .into());
         }
         tracer.on_event(TraceEvent::TurnStart {
             turn: session.turn,
@@ -109,7 +132,7 @@ mod tests {
 
     use super::*;
     use crate::action::JsonToolCall;
-    use crate::error::ProviderError;
+    use crate::error::{LoopError, ProviderError};
     use crate::message::{ContentBlock, Message};
     use crate::provider::{CompletionResponse, Provider};
     use crate::tools::Calculator;
@@ -129,13 +152,19 @@ mod tests {
 
     struct ScriptedProvider {
         responses: RefCell<Vec<Message>>,
+        call_count: RefCell<u32>,
     }
 
     impl ScriptedProvider {
         fn new(responses: Vec<Message>) -> Self {
             Self {
                 responses: RefCell::new(responses),
+                call_count: RefCell::new(0),
             }
+        }
+
+        fn calls(&self) -> u32 {
+            *self.call_count.borrow()
         }
     }
 
@@ -144,10 +173,28 @@ mod tests {
             &self,
             _req: CompletionRequest,
         ) -> Result<CompletionResponse, ProviderError> {
+            *self.call_count.borrow_mut() += 1;
             let mut queue = self.responses.borrow_mut();
             assert!(!queue.is_empty(), "ScriptedProvider: no more responses");
             let message = queue.remove(0);
             Ok(CompletionResponse { message })
+        }
+    }
+
+    struct RepeatingToolCallProvider;
+
+    impl Provider for RepeatingToolCallProvider {
+        fn complete(
+            &self,
+            _req: CompletionRequest,
+        ) -> Result<CompletionResponse, ProviderError> {
+            Ok(CompletionResponse {
+                message: Message::assistant(vec![ContentBlock::ToolCall {
+                    id: "call_repeat".into(),
+                    name: "calculator".into(),
+                    args: serde_json::json!({ "expression": "1+1" }),
+                }]),
+            })
         }
     }
 
@@ -393,5 +440,122 @@ mod tests {
             })
             .collect();
         assert_eq!(tool_results, vec!["2", "6"]);
+    }
+
+    #[test]
+    fn max_turns_zero_fails_immediately() {
+        let mut session = Session::with_history(vec![Message::user("go")]);
+        let provider = ScriptedProvider::new(vec![Message::assistant(vec![
+            ContentBlock::Text("never".into()),
+        ])]);
+        let tracer = RecordingTracer(RefCell::new(Vec::new()));
+
+        let err = run(
+            &mut session,
+            &provider,
+            &ToolRegistry::new(),
+            &JsonToolCall,
+            &tracer,
+            0,
+        )
+        .expect_err("run");
+
+        assert!(matches!(
+            err,
+            StrataError::Loop(LoopError::MaxTurns {
+                max_turns: 0,
+                partial: None,
+            })
+        ));
+        assert_eq!(provider.calls(), 0);
+        assert_eq!(session.history.len(), 1);
+    }
+
+    #[test]
+    fn max_turns_stops_infinite_tool_loop() {
+        let mut session = Session::with_history(vec![Message::user("loop")]);
+        let mut tools = ToolRegistry::new();
+        tools.register(Box::new(Calculator));
+        let tracer = RecordingTracer(RefCell::new(Vec::new()));
+
+        let err = run(
+            &mut session,
+            &RepeatingToolCallProvider,
+            &tools,
+            &JsonToolCall,
+            &tracer,
+            2,
+        )
+        .expect_err("run");
+
+        assert!(matches!(
+            err,
+            StrataError::Loop(LoopError::MaxTurns {
+                max_turns: 2,
+                partial: None,
+            })
+        ));
+        assert_eq!(session.turn, 2);
+        assert!(session.history.len() > 1);
+    }
+
+    #[test]
+    fn max_turns_partial_from_last_assistant_text() {
+        let mut session = Session::with_history(vec![Message::user("calc")]);
+        let provider = ScriptedProvider::new(vec![Message::assistant(vec![
+            ContentBlock::Text("step1".into()),
+            ContentBlock::ToolCall {
+                id: "call_1".into(),
+                name: "calculator".into(),
+                args: serde_json::json!({ "expression": "1+1" }),
+            },
+        ])]);
+        let mut tools = ToolRegistry::new();
+        tools.register(Box::new(Calculator));
+        let tracer = RecordingTracer(RefCell::new(Vec::new()));
+
+        let err = run(
+            &mut session,
+            &provider,
+            &tools,
+            &JsonToolCall,
+            &tracer,
+            1,
+        )
+        .expect_err("run");
+
+        assert!(matches!(
+            err,
+            StrataError::Loop(LoopError::MaxTurns {
+                max_turns: 1,
+                partial: Some(ref text),
+            }) if text == "step1"
+        ));
+        assert_eq!(provider.calls(), 1);
+        assert_eq!(session.turn, 1);
+    }
+
+    #[test]
+    fn max_turns_emits_error_trace() {
+        let mut session = Session::with_history(vec![Message::user("go")]);
+        let tracer = RecordingTracer(RefCell::new(Vec::new()));
+
+        let _ = run(
+            &mut session,
+            &RepeatingToolCallProvider,
+            &ToolRegistry::new(),
+            &JsonToolCall,
+            &tracer,
+            0,
+        );
+
+        let events = tracer.0.borrow();
+        assert!(events.iter().any(|e| matches!(
+            e,
+            TraceEvent::Error {
+                turn: Some(0),
+                message,
+            } if message == "max turns exceeded (0)"
+        )));
     }
 }

@@ -27,7 +27,11 @@ pub enum ProviderError {
 #[derive(Debug, Error)]
 pub enum LoopError {
     #[error("max turns exceeded ({max_turns})")]
-    MaxTurns { max_turns: u32 },
+    MaxTurns {
+        max_turns: u32,
+        /// Last assistant plain-text before termination, if any.
+        partial: Option<String>,
+    },
 }
 
 /// 模型输出或 action 解析错误。循环内回填，不进 [`StrataError`]。
@@ -81,7 +85,10 @@ mod tests {
 
     #[test]
     fn loop_error_display() {
-        let err = LoopError::MaxTurns { max_turns: 10 };
+        let err = LoopError::MaxTurns {
+            max_turns: 10,
+            partial: None,
+        };
         assert_eq!(err.to_string(), "max turns exceeded (10)");
     }
 
@@ -102,7 +109,11 @@ mod tests {
             ProviderError::Auth("invalid api key".into()).into();
         assert!(matches!(provider, StrataError::Provider(_)));
 
-        let loop_err: StrataError = LoopError::MaxTurns { max_turns: 5 }.into();
+        let loop_err: StrataError = LoopError::MaxTurns {
+            max_turns: 5,
+            partial: Some("partial".into()),
+        }
+        .into();
         assert!(matches!(loop_err, StrataError::Loop(_)));
     }
 }
