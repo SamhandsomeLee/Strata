@@ -4,6 +4,7 @@
 //! MVP uses [`JsonToolCall`] (extracts `ContentBlock::ToolCall`); future
 //! backends such as CodeAction can implement the same trait without changing the loop.
 
+use crate::error::ParseError;
 use crate::message::{ContentBlock, Message, Role};
 
 /// Normalized tool invocation for the agentic loop.
@@ -25,6 +26,30 @@ impl Action {
             name: name.into(),
             args,
         }
+    }
+
+    /// Pre-execute validation. Failures become [`ParseError`] backfill in the loop, not `Err`.
+    ///
+    /// `args` 的契约是 JSON object（命名参数）或 `null`（无参数）。其它形态——裸字符串、
+    /// 数字、布尔、数组——都视为模型没把工具参数包成对象，归为 [`ParseError::InvalidToolCall`]
+    /// 回填，让模型纠正。args 内部字段的语义校验仍归各工具的 `execute` 负责。
+    pub fn validate(&self) -> Result<(), ParseError> {
+        if self.id.is_empty() {
+            return Err(ParseError::InvalidToolCall("missing tool call id".into()));
+        }
+        if self.name.is_empty() {
+            return Err(ParseError::InvalidToolCall("missing tool name".into()));
+        }
+        if !matches!(
+            self.args,
+            serde_json::Value::Object(_) | serde_json::Value::Null
+        ) {
+            return Err(ParseError::InvalidToolCall(format!(
+                "tool arguments must be a JSON object, got: {}",
+                self.args
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -151,6 +176,53 @@ mod tests {
         let backend = JsonToolCall;
         let msg = Message::assistant(vec![]);
         assert!(backend.parse_actions(&msg).is_empty());
+    }
+
+    #[test]
+    fn validate_rejects_malformed_tool_calls() {
+        let empty_id = Action::new("", "calculator", serde_json::json!({}));
+        assert!(matches!(
+            empty_id.validate(),
+            Err(ParseError::InvalidToolCall(_))
+        ));
+
+        let empty_name = Action::new("call_1", "", serde_json::json!({}));
+        assert!(matches!(
+            empty_name.validate(),
+            Err(ParseError::InvalidToolCall(_))
+        ));
+
+        let string_args = Action::new(
+            "call_1",
+            "calculator",
+            serde_json::Value::String("{bad".into()),
+        );
+        assert!(matches!(
+            string_args.validate(),
+            Err(ParseError::InvalidToolCall(_))
+        ));
+
+        let ok = Action::new("call_1", "calculator", serde_json::json!({ "x": 1 }));
+        assert!(ok.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_non_object_args() {
+        for bad in [
+            serde_json::json!(42),
+            serde_json::json!(true),
+            serde_json::json!([1, 2, 3]),
+        ] {
+            let action = Action::new("call_1", "calculator", bad);
+            assert!(matches!(
+                action.validate(),
+                Err(ParseError::InvalidToolCall(_))
+            ));
+        }
+
+        // object 与 null 都是合法形态。
+        assert!(Action::new("call_1", "t", serde_json::json!({})).validate().is_ok());
+        assert!(Action::new("call_1", "t", serde_json::Value::Null).validate().is_ok());
     }
 
     #[test]

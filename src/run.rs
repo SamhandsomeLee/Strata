@@ -2,7 +2,7 @@
 //!
 //! Single-thread `while` loop: call → parse → execute → repeat.
 
-use crate::action::ActionBackend;
+use crate::action::{Action, ActionBackend};
 use crate::error::{LoopError, StrataError, ToolError};
 use crate::message::{ContentBlock, Message};
 use crate::provider::{CompletionRequest, Provider};
@@ -79,12 +79,23 @@ pub fn run(
             return Ok(resp.message.text());
         }
 
-        for action in actions {
-            tracer.on_event(TraceEvent::ToolCall {
-                turn: session.turn,
-                id: action.id.clone(),
-                name: action.name.clone(),
-            });
+        for (index, action) in actions.into_iter().enumerate() {
+            let turn = session.turn;
+            let id = backfill_id(&action, turn, index);
+            let name = trace_name(&action.name);
+
+            if let Err(parse_err) = action.validate() {
+                backfill_tool_result(
+                    session,
+                    tracer,
+                    turn,
+                    &id,
+                    &name,
+                    parse_err.to_string(),
+                    true,
+                );
+                continue;
+            }
 
             let result = match tools.get(&action.name) {
                 Some(tool) => tool.execute(action.args),
@@ -98,18 +109,7 @@ pub fn run(
                 Err(e) => (e.to_string(), true),
             };
 
-            session.history.push(Message::tool(ContentBlock::ToolResult {
-                id: action.id.clone(),
-                content,
-                is_error,
-            }));
-
-            tracer.on_event(TraceEvent::ToolResult {
-                turn: session.turn,
-                id: action.id,
-                name: action.name,
-                is_error,
-            });
+            backfill_tool_result(session, tracer, turn, &id, &name, content, is_error);
         }
 
         // 仅在执行过工具后递增：与开头 max_turns 检查呼应，turn 即「已完成的工具往返轮数」。
@@ -124,6 +124,49 @@ fn build_request(session: &Session, tools: &ToolRegistry) -> CompletionRequest {
         max_tokens: DEFAULT_MAX_TOKENS,
         temperature: None,
     }
+}
+
+fn backfill_id(action: &Action, turn: u32, index: usize) -> String {
+    if action.id.is_empty() {
+        format!("parse_error_{turn}_{index}")
+    } else {
+        action.id.clone()
+    }
+}
+
+fn trace_name(name: &str) -> String {
+    if name.is_empty() {
+        "unknown".into()
+    } else {
+        name.to_string()
+    }
+}
+
+fn backfill_tool_result(
+    session: &mut Session,
+    tracer: &dyn Tracer,
+    turn: u32,
+    id: &str,
+    name: &str,
+    content: String,
+    is_error: bool,
+) {
+    tracer.on_event(TraceEvent::ToolCall {
+        turn,
+        id: id.to_string(),
+        name: name.to_string(),
+    });
+    session.history.push(Message::tool(ContentBlock::ToolResult {
+        id: id.to_string(),
+        content,
+        is_error,
+    }));
+    tracer.on_event(TraceEvent::ToolResult {
+        turn,
+        id: id.to_string(),
+        name: name.to_string(),
+        is_error,
+    });
 }
 
 #[cfg(test)]
@@ -557,5 +600,212 @@ mod tests {
                 message,
             } if message == "max turns exceeded (0)"
         )));
+    }
+
+    fn error_tool_results(session: &Session) -> Vec<&ContentBlock> {
+        session
+            .history
+            .iter()
+            .flat_map(|m| m.content.iter())
+            .filter(|b| matches!(b, ContentBlock::ToolResult { is_error: true, .. }))
+            .collect()
+    }
+
+    #[test]
+    fn non_object_string_args_backfills_parse_error() {
+        let mut session = Session::with_history(vec![Message::user("bad args")]);
+        let provider = ScriptedProvider::new(vec![
+            Message::assistant(vec![ContentBlock::ToolCall {
+                id: "call_1".into(),
+                name: "calculator".into(),
+                args: serde_json::Value::String("{bad".into()),
+            }]),
+            Message::assistant(vec![ContentBlock::Text("recovered".into())]),
+        ]);
+        let mut tools = ToolRegistry::new();
+        tools.register(Box::new(Calculator));
+
+        let answer = run(
+            &mut session,
+            &provider,
+            &tools,
+            &JsonToolCall,
+            &RecordingTracer(RefCell::new(Vec::new())),
+            4,
+        )
+        .expect("run");
+
+        assert_eq!(answer, "recovered");
+        let errors = error_tool_results(&session);
+        assert_eq!(errors.len(), 1);
+        assert!(matches!(
+            errors[0],
+            ContentBlock::ToolResult { content, .. } if content.contains("must be a JSON object")
+        ));
+    }
+
+    #[test]
+    fn non_object_scalar_args_backfills_and_does_not_panic() {
+        let mut session = Session::with_history(vec![Message::user("scalar args")]);
+        let provider = ScriptedProvider::new(vec![
+            Message::assistant(vec![ContentBlock::ToolCall {
+                id: "call_1".into(),
+                name: "calculator".into(),
+                args: serde_json::json!(42),
+            }]),
+            Message::assistant(vec![ContentBlock::Text("recovered".into())]),
+        ]);
+        let mut tools = ToolRegistry::new();
+        tools.register(Box::new(Calculator));
+
+        let answer = run(
+            &mut session,
+            &provider,
+            &tools,
+            &JsonToolCall,
+            &RecordingTracer(RefCell::new(Vec::new())),
+            4,
+        )
+        .expect("run");
+
+        assert_eq!(answer, "recovered");
+        assert_eq!(error_tool_results(&session).len(), 1);
+    }
+
+    #[test]
+    fn empty_tool_call_id_backfills_and_continues() {
+        let mut session = Session::with_history(vec![Message::user("no id")]);
+        let provider = ScriptedProvider::new(vec![
+            Message::assistant(vec![ContentBlock::ToolCall {
+                id: String::new(),
+                name: "calculator".into(),
+                args: serde_json::json!({ "expression": "1+1" }),
+            }]),
+            Message::assistant(vec![ContentBlock::Text("ok".into())]),
+        ]);
+        let mut tools = ToolRegistry::new();
+        tools.register(Box::new(Calculator));
+        let tracer = RecordingTracer(RefCell::new(Vec::new()));
+
+        let answer = run(
+            &mut session,
+            &provider,
+            &tools,
+            &JsonToolCall,
+            &tracer,
+            4,
+        )
+        .expect("run");
+
+        assert_eq!(answer, "ok");
+        let errors = error_tool_results(&session);
+        assert_eq!(errors.len(), 1);
+        assert!(matches!(
+            errors[0],
+            ContentBlock::ToolResult { id, .. } if id == "parse_error_0_0"
+        ));
+    }
+
+    #[test]
+    fn empty_tool_name_backfills_and_continues() {
+        let mut session = Session::with_history(vec![Message::user("no name")]);
+        let provider = ScriptedProvider::new(vec![
+            Message::assistant(vec![ContentBlock::ToolCall {
+                id: "call_1".into(),
+                name: String::new(),
+                args: serde_json::json!({}),
+            }]),
+            Message::assistant(vec![ContentBlock::Text("ok".into())]),
+        ]);
+        let tracer = RecordingTracer(RefCell::new(Vec::new()));
+
+        let answer = run(
+            &mut session,
+            &provider,
+            &ToolRegistry::new(),
+            &JsonToolCall,
+            &tracer,
+            4,
+        )
+        .expect("run");
+
+        assert_eq!(answer, "ok");
+        assert!(error_tool_results(&session)
+            .iter()
+            .any(|b| matches!(b, ContentBlock::ToolResult { content, .. } if content.contains("missing tool name"))));
+    }
+
+    #[test]
+    fn tool_execution_failed_backfills_and_continues() {
+        let mut session = Session::with_history(vec![Message::user("divide")]);
+        let provider = ScriptedProvider::new(vec![
+            Message::assistant(vec![ContentBlock::ToolCall {
+                id: "call_1".into(),
+                name: "calculator".into(),
+                args: serde_json::json!({ "expression": "1/0" }),
+            }]),
+            Message::assistant(vec![ContentBlock::Text("recovered".into())]),
+        ]);
+        let mut tools = ToolRegistry::new();
+        tools.register(Box::new(Calculator));
+
+        let answer = run(
+            &mut session,
+            &provider,
+            &tools,
+            &JsonToolCall,
+            &RecordingTracer(RefCell::new(Vec::new())),
+            4,
+        )
+        .expect("run");
+
+        assert_eq!(answer, "recovered");
+        assert!(error_tool_results(&session)
+            .iter()
+            .any(|b| matches!(b, ContentBlock::ToolResult { content, .. } if content.contains("division by zero"))));
+    }
+
+    #[test]
+    fn parse_and_tool_errors_same_turn() {
+        let mut session = Session::with_history(vec![Message::user("mixed")]);
+        let provider = ScriptedProvider::new(vec![
+            Message::assistant(vec![
+                ContentBlock::ToolCall {
+                    id: "call_bad".into(),
+                    name: "calculator".into(),
+                    args: serde_json::Value::String("not json".into()),
+                },
+                ContentBlock::ToolCall {
+                    id: "call_ok".into(),
+                    name: "calculator".into(),
+                    args: serde_json::json!({ "expression": "1+1" }),
+                },
+            ]),
+            Message::assistant(vec![ContentBlock::Text("done".into())]),
+        ]);
+        let mut tools = ToolRegistry::new();
+        tools.register(Box::new(Calculator));
+
+        run(
+            &mut session,
+            &provider,
+            &tools,
+            &JsonToolCall,
+            &RecordingTracer(RefCell::new(Vec::new())),
+            4,
+        )
+        .expect("run");
+
+        let ok_results: Vec<_> = session
+            .history
+            .iter()
+            .flat_map(|m| m.content.iter())
+            .filter_map(|b| match b {
+                ContentBlock::ToolResult { content, is_error, .. } if !is_error => Some(content.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ok_results, vec!["2"]);
+        assert_eq!(error_tool_results(&session).len(), 1);
     }
 }

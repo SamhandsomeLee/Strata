@@ -35,6 +35,10 @@ pub enum LoopError {
 }
 
 /// 模型输出或 action 解析错误。循环内回填，不进 [`StrataError`]。
+///
+/// Provider 层若无法将 tool arguments 解析为 JSON object，会将其存为
+/// [`serde_json::Value::String`]；run 循环在 [`crate::action::Action::validate`] 中
+/// 识别并转为 [`ParseError::InvalidJson`] 回填。
 #[derive(Debug, Error)]
 pub enum ParseError {
     #[error("invalid JSON: {0}")]
