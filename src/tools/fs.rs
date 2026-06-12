@@ -67,7 +67,9 @@ impl FsConfig {
     }
 
     /// Resolve a relative path under the workspace root.
-    fn resolve(&self, raw: &str) -> Result<PathBuf, ToolError> {
+    ///
+    /// `pub(crate)` 而非 `pub`：供同 crate 的 `shell` 工具复用，不对外暴露路径解析细节。
+    pub(crate) fn resolve(&self, raw: &str) -> Result<PathBuf, ToolError> {
         let relative = Self::parse_relative_path(raw)?;
         let mut candidate = self.root.clone();
 
