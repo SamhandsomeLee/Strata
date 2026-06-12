@@ -300,11 +300,11 @@ M5+ 增量     : 第二 provider / streaming+steering / code-action / checkpoint
 
 ## 10. 验收标准（每个里程碑的 done）
 
-- [ ] **M1**：单模型问答循环跑通，无工具，tracing 能看到 provider 调用
-- [ ] **M2**：完整工具闭环——模型发起 tool call → 解析 → 执行 → 回填 → 继续 → 最终答案
-- [ ] **M3**：故意喂非法 JSON / 让工具报错，内核**不崩溃**、能回填让模型纠正；超 max_turns 优雅终止
-- [ ] **M4**：用 Strata 完成一件你**今天真的会手动做**的事（例：让它读某目录代码并改一处、或整理一批文件），全程 tracing 可复盘
-- [ ] 应用层代码里**没有任何 provider 特有逻辑**（model-agnostic 的硬验收）
+- [x] **M1**：单模型问答循环跑通，无工具，tracing 能看到 provider 调用
+- [x] **M2**：完整工具闭环——模型发起 tool call → 解析 → 执行 → 回填 → 继续 → 最终答案
+- [x] **M3**：故意喂非法 JSON / 让工具报错，内核**不崩溃**、能回填让模型纠正；超 max_turns 优雅终止
+- [x] **M4**：用 Strata 完成一件你**今天真的会手动做**的事（例：让它读某目录代码并改一处、或整理一批文件），全程 tracing 可复盘
+- [x] 应用层代码里**没有任何 provider 特有逻辑**（model-agnostic 的硬验收）
 
 ---
 
