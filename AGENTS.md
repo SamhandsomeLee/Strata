@@ -29,18 +29,20 @@
 
 ## 当前里程碑
 
-**M3：健壮性**（C17–C20）——max_turns 优雅终止、错误回填、结构化 tracing、MockProvider 测试。
+**M4：真场景**（C21–C24）——fs/bash 工具，跑通一个日常真任务 ← **MVP 完成线**。
+
+M3 已完成（C17–C20）：max_turns、错误回填、结构化 tracing、MockProvider 集成测试。
 
 M2 已完成（C14–C16）：calculator + 工具执行闭环，`examples/calc.rs` 可演示。
 
 M1 已完成（C10–C13）：DeepSeek 问答循环跑通，`examples/ask.rs` 可演示。
 
-### M3 执行顺序
+### M4 执行顺序
 
-1. **C17** `max_turns` 兜底与失控保护
-2. **C18** parse/tool 错误回填不崩溃（边界强化）
-3. **C19** 结构化 trace 补全
-4. **C20** MockProvider 与循环语义集成测试
+1. **C21** 文件读写工具（fs）
+2. **C22** 命令执行工具（bash/shell）
+3. **C23** 跑通一个日常真任务
+4. **C24** 记录 MVP 验收结果
 
 环境：复制 `.env.example` → `.env`，设置 `DEEPSEEK_API_KEY`。
 
