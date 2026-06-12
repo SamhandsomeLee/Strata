@@ -12,7 +12,7 @@ pub use error::{LoopError, ParseError, ProviderError, StrataError, ToolError};
 pub use message::{ContentBlock, Message, Role};
 pub mod provider;
 
-pub use provider::{CompletionRequest, CompletionResponse, Provider};
+pub use provider::{CompletionRequest, CompletionResponse, Provider, TokenUsage};
 pub mod providers;
 
 pub use providers::DeepSeekProvider;

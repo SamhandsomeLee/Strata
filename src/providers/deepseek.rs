@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::ProviderError;
 use crate::message::{ContentBlock, Message, Role};
-use crate::provider::{CompletionRequest, CompletionResponse, Provider};
+use crate::provider::{CompletionRequest, CompletionResponse, TokenUsage, Provider};
 use crate::tool::ToolSchema;
 
 /// OpenAI-compatible API base (not the Anthropic `/anthropic` path).
@@ -174,6 +174,15 @@ struct ApiToolFunction {
 #[derive(Debug, Deserialize)]
 struct ApiChatResponse {
     choices: Vec<ApiChoice>,
+    #[serde(default)]
+    usage: Option<ApiUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiUsage {
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    total_tokens: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -371,7 +380,14 @@ fn parse_http_response(
         .ok_or_else(|| ProviderError::InvalidResponse("missing choices".into()))?;
 
     let message = decode_assistant_message(choice.message)?;
-    Ok(CompletionResponse { message })
+    Ok(CompletionResponse {
+        message,
+        usage: parsed.usage.map(|u| TokenUsage {
+            prompt_tokens: u.prompt_tokens,
+            completion_tokens: u.completion_tokens,
+            total_tokens: u.total_tokens,
+        }),
+    })
 }
 
 fn api_error_message(body: &str) -> String {
@@ -440,6 +456,28 @@ mod tests {
         })
         .expect("decode");
         assert!(msg.has_tool_calls());
+    }
+
+    #[test]
+    fn decode_response_usage_from_json() {
+        let json = r#"{
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "hi"
+                }
+            }],
+            "usage": {
+                "prompt_tokens": 12,
+                "completion_tokens": 8,
+                "total_tokens": 20
+            }
+        }"#;
+        let parsed: ApiChatResponse = serde_json::from_str(json).expect("deserialize");
+        let usage = parsed.usage.expect("usage");
+        assert_eq!(usage.prompt_tokens, 12);
+        assert_eq!(usage.completion_tokens, 8);
+        assert_eq!(usage.total_tokens, 20);
     }
 
     #[test]

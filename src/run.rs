@@ -2,6 +2,8 @@
 //!
 //! Single-thread `while` loop: call → parse → execute → repeat.
 
+use std::time::Instant;
+
 use crate::action::{Action, ActionBackend};
 use crate::error::{LoopError, StrataError, ToolError};
 use crate::message::{ContentBlock, Message};
@@ -46,6 +48,7 @@ pub fn run(
             tracer.on_event(TraceEvent::Error {
                 turn: Some(session.turn),
                 message: format!("max turns exceeded ({max_turns})"),
+                duration_ms: None,
             });
             return Err(LoopError::MaxTurns {
                 max_turns,
@@ -57,22 +60,42 @@ pub fn run(
             turn: session.turn,
         });
 
-        // provider 调用失败经 `?` 上抛为 StrataError::Provider，由应用层处理。
-        // 此处刻意不发 TraceEvent::Error：失败点的结构化追踪（含 token/耗时/错误）统一在
-        // C19 补齐。ProviderCall 事件放在 complete 成功返回之后，语义是「调用成功才记」，
-        // 失败轮不会出现 ProviderCall，也符合预期。
-        let resp = provider.complete(build_request(session, tools))?;
-        tracer.on_event(TraceEvent::ProviderCall {
-            turn: session.turn,
-        });
+        // 仅测 provider 调用耗时——它是每轮耗时的主项。设计 §6 提到「每个 turn 的耗时」，
+        // 更细的工具执行耗时 / turn 级总耗时暂不记（MVP 不需要），需要时作独立增强。
+        // `as u64`：as_millis() 返回 u128，溢出需 ~5.8 亿年，实际无害。
+        // 记录（C19 审查）：耗时目前只覆盖 provider 调用本身，未含工具执行耗时或整轮耗时。
+        // provider 调用是耗时主项，对 MVP 足够；若将来要严格对齐设计 §6「每个 turn 的耗时」，
+        // 可另加 turn 级 duration 或在 ToolResult 上带耗时，建议作为独立改动而非扩到这里。
+        // `as u64` 截断仅在 elapsed 超过约 5.8 亿年时发生，实际无害。
+        let started = Instant::now();
+        let completion = provider.complete(build_request(session, tools));
+        let duration_ms = started.elapsed().as_millis() as u64;
+
+        let resp = match completion {
+            Ok(resp) => {
+                tracer.on_event(TraceEvent::ProviderCall {
+                    turn: session.turn,
+                    duration_ms,
+                    usage: resp.usage,
+                });
+                resp
+            }
+            Err(e) => {
+                // 记录（C19 审查）：失败轮的 Error 事件不带 token usage。少数 provider 在
+                // 限流/超时响应里也会回 usage，此处会丢；MVP 不处理，仅标记。
+                tracer.on_event(TraceEvent::Error {
+                    turn: Some(session.turn),
+                    message: e.to_string(),
+                    duration_ms: Some(duration_ms),
+                });
+                return Err(e.into());
+            }
+        };
+
         session.history.push(resp.message.clone());
 
         let actions = backend.parse_actions(&resp.message);
         if actions.is_empty() {
-            // TurnEnd 目前只在纯文本终止轮发出，执行工具的轮次结束时不发，因此 TurnStart
-            // 与 TurnEnd 暂不成对。这与 §3 伪代码字面一致（伪代码也只在终止处发 TurnEnd），
-            // 不算违背设计，但属可观测性缺口：C19 补全事件流时应把 TurnEnd 移到每轮末尾
-            // （turn += 1 之前），让每个 TurnStart 都有配对的 TurnEnd。
             tracer.on_event(TraceEvent::TurnEnd {
                 turn: session.turn,
             });
@@ -111,6 +134,10 @@ pub fn run(
 
             backfill_tool_result(session, tracer, turn, &id, &name, content, is_error);
         }
+
+        tracer.on_event(TraceEvent::TurnEnd {
+            turn: session.turn,
+        });
 
         // 仅在执行过工具后递增：与开头 max_turns 检查呼应，turn 即「已完成的工具往返轮数」。
         session.turn += 1;
@@ -175,9 +202,9 @@ mod tests {
 
     use super::*;
     use crate::action::JsonToolCall;
-    use crate::error::{LoopError, ProviderError};
+    use crate::error::{LoopError, ProviderError, StrataError};
     use crate::message::{ContentBlock, Message};
-    use crate::provider::{CompletionResponse, Provider};
+    use crate::provider::{CompletionResponse, Provider, TokenUsage};
     use crate::tools::Calculator;
 
     struct TextProvider;
@@ -189,6 +216,7 @@ mod tests {
         ) -> Result<CompletionResponse, ProviderError> {
             Ok(CompletionResponse {
                 message: Message::assistant(vec![ContentBlock::Text("hello".into())]),
+                usage: None,
             })
         }
     }
@@ -220,7 +248,10 @@ mod tests {
             let mut queue = self.responses.borrow_mut();
             assert!(!queue.is_empty(), "ScriptedProvider: no more responses");
             let message = queue.remove(0);
-            Ok(CompletionResponse { message })
+            Ok(CompletionResponse {
+                message,
+                usage: None,
+            })
         }
     }
 
@@ -237,7 +268,37 @@ mod tests {
                     name: "calculator".into(),
                     args: serde_json::json!({ "expression": "1+1" }),
                 }]),
+                usage: None,
             })
+        }
+    }
+
+    struct UsageProvider;
+
+    impl Provider for UsageProvider {
+        fn complete(
+            &self,
+            _req: CompletionRequest,
+        ) -> Result<CompletionResponse, ProviderError> {
+            Ok(CompletionResponse {
+                message: Message::assistant(vec![ContentBlock::Text("ok".into())]),
+                usage: Some(TokenUsage {
+                    prompt_tokens: 10,
+                    completion_tokens: 5,
+                    total_tokens: 15,
+                }),
+            })
+        }
+    }
+
+    struct FailingProvider;
+
+    impl Provider for FailingProvider {
+        fn complete(
+            &self,
+            _req: CompletionRequest,
+        ) -> Result<CompletionResponse, ProviderError> {
+            Err(ProviderError::Network("connection reset".into()))
         }
     }
 
@@ -285,7 +346,14 @@ mod tests {
         let events = tracer.0.borrow();
         assert_eq!(events.len(), 3);
         assert!(matches!(events[0], TraceEvent::TurnStart { turn: 0 }));
-        assert!(matches!(events[1], TraceEvent::ProviderCall { turn: 0 }));
+        assert!(matches!(
+            events[1],
+            TraceEvent::ProviderCall {
+                turn: 0,
+                duration_ms: _,
+                usage: None,
+            }
+        ));
         assert!(matches!(events[2], TraceEvent::TurnEnd { turn: 0 }));
     }
 
@@ -598,8 +666,102 @@ mod tests {
             TraceEvent::Error {
                 turn: Some(0),
                 message,
+                duration_ms: None,
             } if message == "max turns exceeded (0)"
         )));
+    }
+
+    #[test]
+    fn provider_failure_emits_error_with_duration() {
+        let mut session = Session::with_history(vec![Message::user("ping")]);
+        let tracer = RecordingTracer(RefCell::new(Vec::new()));
+
+        let err = run(
+            &mut session,
+            &FailingProvider,
+            &ToolRegistry::new(),
+            &JsonToolCall,
+            &tracer,
+            4,
+        )
+        .expect_err("run");
+
+        assert!(matches!(err, StrataError::Provider(_)));
+        let events = tracer.0.borrow();
+        assert!(events.iter().any(|e| matches!(
+            e,
+            TraceEvent::Error {
+                turn: Some(0),
+                message,
+                duration_ms: Some(_),
+            } if message.contains("connection reset")
+        )));
+        assert!(!events.iter().any(|e| matches!(e, TraceEvent::ProviderCall { .. })));
+    }
+
+    #[test]
+    fn provider_call_includes_usage_when_present() {
+        let mut session = Session::with_history(vec![Message::user("ping")]);
+        let tracer = RecordingTracer(RefCell::new(Vec::new()));
+
+        run(
+            &mut session,
+            &UsageProvider,
+            &ToolRegistry::new(),
+            &JsonToolCall,
+            &tracer,
+            4,
+        )
+        .expect("run");
+
+        let events = tracer.0.borrow();
+        assert!(events.iter().any(|e| matches!(
+            e,
+            TraceEvent::ProviderCall {
+                turn: 0,
+                duration_ms: _,
+                usage: Some(TokenUsage {
+                    prompt_tokens: 10,
+                    completion_tokens: 5,
+                    total_tokens: 15,
+                }),
+            }
+        )));
+    }
+
+    #[test]
+    fn tool_loop_emits_turn_end_each_round() {
+        let mut session = Session::with_history(vec![Message::user("算 1+2")]);
+        let provider = ScriptedProvider::new(vec![
+            Message::assistant(vec![ContentBlock::ToolCall {
+                id: "call_1".into(),
+                name: "calculator".into(),
+                args: serde_json::json!({ "expression": "1+2" }),
+            }]),
+            Message::assistant(vec![ContentBlock::Text("done".into())]),
+        ]);
+        let mut tools = ToolRegistry::new();
+        tools.register(Box::new(Calculator));
+        let tracer = RecordingTracer(RefCell::new(Vec::new()));
+
+        run(
+            &mut session,
+            &provider,
+            &tools,
+            &JsonToolCall,
+            &tracer,
+            4,
+        )
+        .expect("run");
+
+        let events = tracer.0.borrow();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| matches!(e, TraceEvent::TurnEnd { .. }))
+                .count(),
+            2
+        );
     }
 
     fn error_tool_results(session: &Session) -> Vec<&ContentBlock> {

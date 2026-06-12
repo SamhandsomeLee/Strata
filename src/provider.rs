@@ -27,10 +27,20 @@ impl CompletionRequest {
     }
 }
 
+/// Token counts from a provider completion response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TokenUsage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
+}
+
 /// Unified completion output: one assistant turn in the internal message model.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompletionResponse {
     pub message: Message,
+    /// `None` when the provider omits usage (e.g. test doubles).
+    pub usage: Option<TokenUsage>,
 }
 
 /// Model-agnostic provider boundary. Implementations translate to/from native API formats.
@@ -49,6 +59,7 @@ mod tests {
         fn complete(&self, _req: CompletionRequest) -> Result<CompletionResponse, ProviderError> {
             Ok(CompletionResponse {
                 message: Message::assistant(vec![ContentBlock::Text("ok".into())]),
+                usage: None,
             })
         }
     }
@@ -75,6 +86,19 @@ mod tests {
             }),
         };
         assert_eq!(schema.parameters["type"], "object");
+    }
+
+    #[test]
+    fn completion_response_carries_optional_usage() {
+        let resp = CompletionResponse {
+            message: Message::assistant(vec![ContentBlock::Text("ok".into())]),
+            usage: Some(TokenUsage {
+                prompt_tokens: 1,
+                completion_tokens: 2,
+                total_tokens: 3,
+            }),
+        };
+        assert_eq!(resp.usage.unwrap().total_tokens, 3);
     }
 
     #[test]
