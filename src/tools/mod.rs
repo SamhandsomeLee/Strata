@@ -3,5 +3,7 @@
 //! Executable tools live here; the kernel defines only the trait boundary in `tool.rs`.
 
 pub mod calculator;
+pub mod fs;
 
 pub use calculator::Calculator;
+pub use fs::{FsConfig, ListDir, ReadFile, WriteFile, MAX_READ_BYTES};

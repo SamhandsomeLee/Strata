@@ -27,7 +27,7 @@ pub mod tool;
 pub use tool::{Tool, ToolRegistry, ToolSchema};
 pub mod tools;
 
-pub use tools::Calculator;
+pub use tools::{Calculator, FsConfig, ListDir, ReadFile, WriteFile, MAX_READ_BYTES};
 pub mod trace;
 
 pub use trace::{ConsoleTracer, NoopTracer, TraceEvent, Tracer};
